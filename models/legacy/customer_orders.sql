@@ -6,20 +6,20 @@ WITH paid_orders as (select Orders.ID as order_id,
     p.payment_finalized_date,
     C.FIRST_NAME    as customer_first_name,
         C.LAST_NAME as customer_last_name
-FROM dbt-tutorial.jaffle_shop.orders as Orders
+FROM {{ source('jaffle_shop', 'orders') }} as Orders
 left join (select ORDERID as order_id, max(CREATED) as payment_finalized_date, sum(AMOUNT) / 100.0 as total_amount_paid
-        from dbt-tutorial.stripe.payment
+        from {{ source('stripe', 'payment') }}
         where STATUS <> 'fail'
         group by 1) p ON orders.ID = p.order_id
-left join dbt-tutorial.jaffle_shop.customers C on orders.USER_ID = C.ID ),
+left join {{ source('jaffle_shop', 'customers') }} C on orders.USER_ID = C.ID ),
 
 customer_orders 
 as (select C.ID as customer_id
     , min(ORDER_DATE) as first_order_date
     , max(ORDER_DATE) as most_recent_order_date
     , count(ORDERS.ID) AS number_of_orders
-from dbt-tutorial.jaffle_shop.customers C 
-left join dbt-tutorial.jaffle_shop.orders as Orders
+from {{ source('jaffle_shop', 'customers') }} C 
+left join {{ source('jaffle_shop', 'orders') }} as Orders
 on orders.USER_ID = C.ID 
 group by 1)
 
