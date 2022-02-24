@@ -1,84 +1,51 @@
 With 
--- IMPORT CTEs
-orders as (
-    select * from {{ source('jaffle_shop', 'orders') }}
-),
 
 customers as (
-    select * from {{ source('jaffle_shop', 'customers') }}
+    select * from {{ ref('stg_jaffle_shop__customers')}}
 ),
 
-payments as (
-    select * from {{ source('stripe', 'payment') }}
-),
-
---LOGICAL CTEs
-finalized_total as (
-
-    select 
-
-        orderid as order_id, 
-        max(created) as payment_finalized_date, 
-        sum(amount) / 100.0 as total_amount_paid
-
-    from payments
-
-    where status <> 'fail'
-
-    group by 1
+orders as (
+    select * from {{ ref('stg_jaffle_shop__orders') }}
 ),
 
 paid_orders as (
-
-    select 
-    orders.id as order_id,
-    orders.user_id as customer_id,
-    orders.order_date as order_placed_at,
-    orders.status as order_status,
-    p.total_amount_paid,
-    p.payment_finalized_date,
-    c.first_name as customer_first_name,
-    c.last_name as customer_last_name
-
-from orders
-
-left join finalized_total
-    p on orders.id = p.order_id
-
-left join customers c 
-on orders.user_id = c.id 
-
+    select * from {{ ref('int_orders') }}
 ),
 
 customer_orders as (
     
-    select c.id as customer_id, 
+select customers.id as customer_id, 
     min(order_date) as first_order_date, 
     max(order_date) as most_recent_order_date,
     count(orders.id) as number_of_orders
 
-from customers c 
+from customers
 
 left join orders
-on orders.user_id = c.id 
+on orders.user_id = customers.id 
 
 group by 1
+
 ),
 
 total_clv as (
 
 select
-        p.order_id,
-        sum(t2.total_amount_paid) as clv_bad
-    from paid_orders p
 
-    left join paid_orders t2 
-    on p.customer_id = t2.customer_id and p.order_id >= t2.order_id
+    p1.order_id,
+    sum(p2.total_amount_paid) as clv_bad
 
-    group by 1
+from paid_orders p1
 
-    order by p.order_id
+left join paid_orders p2 
+on p1.customer_id = p2.customer_id and p1.order_id >= p2.order_id
+
+group by 1
+order by p1.order_id
+
 ),
+
+--FINAL CTE
 
 final as (
 
@@ -87,20 +54,20 @@ select
     p.*,
     row_number() over (order by p.order_id) as transaction_seq,
     row_number() over (partition by customer_id order by p.order_id) as customer_sales_seq,
-    case when c.first_order_date = p.order_placed_at
-    then 'new'
-    else 'return' end as nvsr,
-    x.clv_bad as customer_lifetime_value,
-    c.first_order_date as fdos
+    case when customer_orders.first_order_date = p.order_placed_at
+        then 'new' else 'return' end as nvsr,
+    total_clv.clv_bad as customer_lifetime_value,
+    customer_orders.first_order_date as fdos
 
-from paid_orders p
+from paid_orders as p
 
-left join customer_orders 
-as c using (customer_id)
+left join customer_orders using (customer_id)
 
-left outer join total_clv x
-on x.order_id = p.order_id
+left outer join total_clv 
+on total_clv.order_id = p.order_id
 
-order by order_id)
+order by order_id
+
+)
 
 select * from final
